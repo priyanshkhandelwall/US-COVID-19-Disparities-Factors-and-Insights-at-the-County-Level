@@ -20,11 +20,9 @@ This project leverages a robust set of tools and libraries for data analysis, ma
 
 How to Run the Analysis
 
-# 1.Clone the Repository:
+# Clone the Repository:
 
-Bash
-git clone <repository-url>
-cd US-COVID-19-Disparities
+1. Bash -> git clone <repository-url> -> cd US-COVID-19-Disparities
 
 2. Install R and RStudio: Ensure you have R and RStudio installed on your system.
 

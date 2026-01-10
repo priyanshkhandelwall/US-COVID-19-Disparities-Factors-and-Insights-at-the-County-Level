@@ -53,13 +53,19 @@ install.packages("package_name")
 4️⃣ Run the Analysis
 Knit the GP3-Group4.Rmd file to HTML or PDF directly from RStudio to reproduce the analysis and generate the report.
 
+---
+
 ✅ Key Outcomes
 - Identified county-level factors strongly associated with higher COVID-19 case rates
 - Highlighted the role of mobility patterns and healthcare access in regional disparities
 - Provided insights to support data-driven public health planning and decision-making
 
+---
+
 🤝 Contributing
 Contributions are welcome. Feel free to fork this repository, submit pull requests, or open issues with suggestions or improvements.
+
+---
 
 📄 License
 This project is open-source and available under the MIT License.

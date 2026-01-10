@@ -30,6 +30,11 @@ How to Run the Analysis
 
 4. Run the R Markdown: You can knit the GP3-Group4.Rmd file to HTML or PDF directly from RStudio to reproduce the analysis and generate the report.
 
+## Key Outcomes
+1. Identified county-level factors strongly associated with higher COVID-19 case rates
+2. Highlighted the role of mobility and healthcare access in regional disparities
+3. Provided insights to support data-driven public health planning
+
 # Contributing
 Feel free to fork this repository, submit pull requests, or open issues if you have suggestions or improvements.
 

@@ -1,0 +1,987 @@
+---
+title: "The Uneven Spread of COVID-19 in US Counties"
+author: "Group 4"
+subtitle: 'How do grocery mobility patterns, age structure, education levels, and healthcare capacity relate to variation in COVID-19 cases across US counties?'
+output:
+  html_document:
+    fig_caption: true
+    toc: FALSE
+    toc_depth: 1
+    df_print: paged
+  pdf_document:
+    toc: FALSE
+    latex_engine: xelatex
+header-includes:
+- \usepackage{caption}
+- \captionsetup[figure]{labelformat=empty,labelsep=none}
+- \usepackage{float}
+mainfont: Times New Roman
+urlcolor: blue
+always_allow_html: true
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 7,
+  fig.height = 4,
+  animation = FALSE
+)
+
+# Core packages
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(zoo)
+library(DT)
+library(patchwork)
+library(plm)
+library(leaflet)
+library(crosstalk)
+library(maps)
+library(viridis)
+library(plotly)
+library(stargazer)
+library(knitr)
+library(tibble)
+
+# Animation stack 
+library(gganimate)
+library(gifski)
+library(transformr)
+library(ragg)
+
+
+is_pdf <- knitr::is_latex_output()
+is_html <- knitr::is_html_output()
+
+```
+
+```{r load_create , echo=FALSE}
+# Load cleaned data
+load("Data/covid.data_cleaned.Rdata")
+
+# Create the object used throughout the analysis
+covid <- covid.data
+```
+
+
+```{r prepare-covid-vars, echo=FALSE}
+covid <- covid %>%
+  mutate(
+    date = as.Date(date),
+    cases_rate = new.cases,        
+    cases_14days = cases_14days,   
+    month = month(date),
+    year = year(date),
+    age_65_pct = age.65.plus * 100
+  )
+
+
+```
+
+
+```{r check-vars, echo=FALSE}
+
+required_vars <- c(
+  "state",
+  "age.65.plus",
+  "pcnt.less.than.high.school",
+  "active.patient.care.physicians",
+  "mobility.grocery",
+  "cases_rate",
+  "icu.beds"
+)
+
+missing_vars <- setdiff(required_vars, names(covid))
+
+if (length(missing_vars) > 0) {
+  stop(paste("Missing variables:", paste(missing_vars, collapse = ", ")))
+}
+```
+
+![Figure 1: Distribution of COVID-19 cases across U.S. counties](Data/Images/Intro Image.png)
+
+:::: only-html
+::: {style="margin-top: 30px;"}
+:::
+::::
+
+::: only-latex
+\vspace{15mm}
+:::
+
+
+:::: only-html
+::: {style="margin-top: 30px;"}
+:::
+::::
+
+::: only-latex
+\vspace{15mm}
+:::
+
+From the first reported cases to the Omicron wave, the United States experienced a dramatic and uneven spread of COVID-19 between 2020 and 2022. Some counties experienced repeated surges, while others saw relatively lower case rates throughout the pandemic. These differences raise a simple question: why were some communities hit so much harder than others? This article answers this question by examining state differences, age profiles, education levels, patterns of movement through public transport, and the availability of patient-care physicians.
+
+
+Understanding why some communities were hit harder than others has critical implications for public health preparedness and policy design. By identifying the demographic, behavioural, and healthcare factors that influenced transmission at the county level, policymakers can design targeted interventions, allocate medical resources effectively, and protect vulnerable populations in future health crises. Counties serve as natural units for this analysis because they often share common healthcare systems, implement coordinated policy responses, and contain populations with distinct socioeconomic and demographic characteristics.
+
+This analysis examines county-day observations from January 2020 to May 2022. The dependent variable is the daily rate of new COVID-19 cases per 100,000 population, allowing comparison across counties of different sizes (5, 10). The analysis combines county-level COVID-19 case data from the Johns Hopkins University Coronavirus Resource Centre with publicly available Google mobility data and U.S. county demographic and healthcare statistics [5] [7] [8] [10] [17].
+
+Figure 2 illustrates the national trajectory of new COVID-19 case rates between 2020 and 2022. Case rates increased steadily during the first year of the pandemic, fell during parts of 2021, and then rose sharply again from mid-2021 to early 2022, coinciding with major pandemic waves. After this peak, new case rates declined and eventually stabilized.
+
+```{r national-trend, echo=FALSE, fig.cap="Figure 2: National average case rate from 2020-2022", fig.pos="H"}
+
+library(ggplot2)
+library(gganimate)
+
+national_trend <- covid %>%
+  group_by(date) %>%
+  summarise(
+    avg_cases = mean(cases_rate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+p_nat <- ggplot(national_trend, aes(x = date, y = avg_cases)) +
+  geom_line(color = "darkblue", linewidth = 1) +
+  labs(
+    title = "US National Average Daily Case Rate",
+    subtitle = "Date: {frame_along}",
+    x = "Date",
+    y = "Average new cases per 100,000"
+  ) +
+  theme_minimal()
+
+p_anim <- p_nat +
+  transition_reveal(along = date)
+
+if (knitr::is_html_output()) {
+  animate(
+    p_anim,
+    nframes = 100,
+    fps = 12,
+    width = 800,          
+    height = 500,         
+    units = "px",         
+    res = 96,             
+    device = "ragg_png",
+    renderer = gifski_renderer()
+  )
+} else {
+  p_nat
+}
+
+```
+
+:::: only-html
+::: {style="margin-top: 20px;"}
+:::
+::::
+
+::: only-latex
+\vspace{15mm}
+:::
+
+### Why Did COVID-19 Affect Some Counties More Than Others?
+
+While national case rates rose and fell in distinct waves, these aggregate trends mask substantial differences across local communities. To understand why COVID-19 spread so unevenly across the United States, we examine how demographic characteristics, patterns of movement, and healthcare capacity varied across counties.
+
+
+##### *Movement Patterns: Grocery  & Pharmacy Mobility*
+
+
+Movement to grocery stores and pharmacies represents essential activities that continued throughout the pandemic. Using Google mobility data tracking percent changes from pre-pandemic baselines, we assess whether changes in visits to these essential locations correlated with transmission rates. While many activities ceased during lockdowns, grocery shopping remained necessary, creating ongoing opportunities for viral exposure and potential transmission [12] [15].
+
+Beyond capturing regular movement, grocery and pharmacy mobility reflects routine contact in indoor areas, where distancing may be limited and mask adherence was unequal [12]. Because these activities are unavoidable, variation in grocery mobility across counties may indicate differences in baseline exposure risk. As such, this measure provides insight into how essential mobility may have contributed to persistent differences in COVID-19 case rates across communities [15] [18].
+
+
+```{r mobility-distributions,echo=FALSE,fig.cap="Fig 3: Distribution of grocery mobility changes", fig.pos="H"}
+
+p_mob <- ggplot(covid, aes(x = mobility.grocery)) +
+  geom_density(fill = "steelblue", alpha = 0.7) +
+  labs(
+    x = "Grocery mobility (% change)",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r mobility-transit-scatter, echo=FALSE, fig.pos="H", fig.cap="COVID-19 case rates and public transit mobility"}
+set.seed(123)
+
+covid_plot <- covid %>%
+  filter(
+    !is.na(mobility.grocery),
+    !is.na(cases_rate),
+    cases_rate > 0
+  ) %>%
+  sample_n(20000)
+
+p_grocery <- ggplot(
+  covid_plot,
+  aes(x = mobility.grocery, y = cases_rate)
+) +
+  geom_point(alpha = 0.15) +
+  geom_smooth(method = "lm", se = FALSE, color = "steelblue") +
+  scale_y_log10() +
+  labs(
+    x = "Grocery mobility (% change)",
+    y = "New COVID-19 cases"
+  ) +
+  theme_minimal()
+
+```
+
+```{r displaying mobility plots, echo=FALSE, fig.cap="Figure 3 (Left): Grocery mobility distribution | Figure 4 (Right) : Relationship between grocery mobility and new COVID-19 case rates"}
+
+p_mob <- p_mob +
+  theme(
+    plot.margin = margin(t = 10, r = 30, b = 10, l = 10)
+  )
+
+p_grocery <- p_grocery +
+  theme(
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 30)
+  )
+
+p_mob | p_grocery
+
+
+```
+
+Figure 3 pools all county–day observations from 2020 to 2022, showing how grocery and pharmacy visits typically differed from pre-pandemic levels over the course of the pandemic. Most observations cluster close to zero, indicating that visits to essential locations generally stayed near their usual levels, with occasional minor spikes during periods of uncertainty.
+
+Figure 4 shows the relationship between grocery mobility and new COVID-19 case rates across U.S. counties. While grocery visits remained close to pre-pandemic levels for most of the period, case rates varied widely at all mobility levels. The near-flat trend line indicates only a weak association between grocery mobility and new infections, suggesting that mobility alone cannot explain differences in COVID-19 spread across counties.
+
+```{r county-averages, echo=FALSE}
+county_avg <- covid %>%
+  group_by(county_state) %>%
+  summarise(
+    mean_cases = mean(cases_rate, na.rm = TRUE),
+    age_65plus = first(age.65.plus),
+    low_edu = first(pcnt.less.than.high.school),
+    physicians = first(active.patient.care.physicians),
+    icu_beds = first(icu.beds), 
+    .groups = "drop"
+  ) %>%
+  filter(mean_cases > 0)
+
+```
+
+##### *Demographic Structure: Population Aged 65 and Over*
+
+The proportion of residents aged 65 and older is useful to understand transmission dynamics. Research suggests older populations may have exhibited different contact patterns and mobility behaviours, potentially affecting both exposure risk and case detection rates [3] [12]. 
+Age structure is also closely linked to risk perception and testing behavior, all of which influence observed case rates independently of true infection levels [3]. Older populations may be more likely to seek medical care or testing when symptomatic, but also more likely to reduce social interactions, leading to ambiguous effects on reported case counts.
+
+```{r age65-distribution, echo=FALSE, fig.cap="Distribution of the share of residents aged 65+ across U.S. counties", fig.pos="H"}
+p_age_dist <- ggplot(county_avg, aes(x = age_65plus)) +
+  geom_density(fill = "steelblue", alpha = 0.7) +
+  labs(
+    x = "% of population aged 65+",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+```
+
+```{r age65-plot, echo=FALSE, fig.cap="Average COVID-19 case rates vs % aged 65+"}
+p_age65 <- ggplot(county_avg, aes(age_65plus, mean_cases)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE) +
+  labs(
+    x = "% of population aged 65+",
+    y = "Avg cases per 100k"
+  ) +
+  theme_minimal()
+
+```
+
+```{r displaying age plots, echo=FALSE, fig.cap="Figure 5 (Left): Distribution of population aged 65+ | Figure 6 (Right) : Relationship between population aged 65+ and new COVID-19 case rates"}
+
+p_age_dist <- p_age_dist +
+  theme(
+    plot.margin = margin(t = 10, r = 30, b = 10, l = 10)
+  )
+
+p_age65 <- p_age65 +
+  theme(
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 30)
+  )
+
+p_age_dist | p_age65
+
+
+```
+
+Figure 5 distribution represents the distribution of the population above the age of 65. The peak of the graph indicates that a typical U.S. county has approximately 20% of residents above the age of 65. The right skewness (longer tail on the right) indicates that there are a small number of counties with big proportions of older populations. This variation highlights important differences in population vulnerability across counties.
+
+The fitted trend line in Figure 6 slopes slightly downward, indicating that counties with older populations did not experience systematically higher case rates on average. This likely reflects behavioural differences such as reduced mobility and higher adherence to protective measures rather than lower vulnerability to infection itself. Overall, age structure alone explains little of the observed variation in COVID-19 case rates across counties.
+
+##### *Socioeconomic Context: Educational Level*
+
+The percentage of adults without a high school diploma serves as a proxy for socioeconomic disadvantage. Education levels may influence pandemic outcomes through multiple pathways: access to remote work options, health literacy affecting adherence to precautions, differential occupational exposure, and access to testing and healthcare [3] [6] [14]. 
+
+Education is widely used in public health research as an indicator of long-term socioeconomic conditions [3]. Lower education levels are often associated with front-line or essential occupations, crowded housing, and limited access to reliable health information, all of which can increase exposure risk [6]. At the same time, educational disadvantage may also contribute to under-testing and under-reporting, making it especially important to account for when interpreting observed differences in COVID-19 case rates across counties [3] [9].
+
+
+```{r low-education-distribution, echo=FALSE, fig.cap="Distribution of adults without a high school diploma across U.S. counties"}
+
+p_lowedu_dist <- ggplot(county_avg, aes(x = low_edu)) +
+  geom_density(fill = "steelblue", alpha = 0.7) +
+  labs(
+    x = "% of population without a high school diploma",
+    y = "Density"
+  ) +
+  theme(
+  plot.title = element_text(size = 4, face = "bold"),
+  axis.title = element_text(size = 9),
+  axis.text  = element_text(size = 8)
+) + 
+  theme_minimal()
+
+```
+
+```{r low-education-plot, echo=FALSE, fig.cap="Average COVID-19 case rates vs % with less than high school diploma"}
+
+p_lowedu <- ggplot(county_avg, aes(low_edu, mean_cases)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE) +
+  labs(
+    x = "% of population without a high school diploma",
+    y = "Avg cases per 100k"
+  ) +
+  
+  theme(
+  plot.title = element_text(size = 4, face = "bold"),
+  axis.title = element_text(size = 9),
+  axis.text  = element_text(size = 8)
+) + 
+  theme_minimal()
+
+
+
+```
+
+```{r displaying education plots, echo=FALSE, fig.cap="Figure 7 (Left): Distribution of adults without a high school diploma | Figure 8 (Right) : Relationship between population without a high school diploma and new COVID-19 case rates"}
+
+p_lowedu_dist <- p_lowedu_dist +
+  theme(
+    plot.margin = margin(t = 10, r = 30, b = 10, l = 10)
+  )
+
+p_lowedu <- p_lowedu +
+  theme(
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 30)
+  )
+
+p_lowedu_dist | p_lowedu
+
+
+```
+
+The peak in Figure 7 at 10% indicates that in a typical county, 10% of its residents lack a highschool qualification. However, there are some counties with 20-35% of its population lacking this qualification. This shows that educational disadvantage is unevenly distributed.
+
+Counties with higher levels of educational disadvantage tend to show slightly higher average case rates, as reflected in the upward-sloping trend line in Figure 8. However, the wide spread of points indicates substantial variation within counties with similar education levels. Education appears to be linked to COVID-19 spread, but it is only one of many factors shaping transmission patterns across communities.
+
+##### *Healthcare Resources: Physician Availability*
+
+The density of active patient care physicians per 100,000 population represents a county’s healthcare infrastructure and access to medical services. 
+
+While physician availability may not directly prevent transmission, it affects testing capacity, case detection rates, and the ability to diagnose infections promptly [11] [14]. Counties with fewer physicians may experience delays in diagnosis or reduced access to testing, leading to artificially lower reported case counts despite similar underlying transmission. Including physician density helps separate differences in disease spread from differences in surveillance and reporting capacity across counties [6] [14].
+
+
+
+```{r physicians-distribution, echo=FALSE, fig.cap="Distribution of physicians per 100k people"}
+
+p_phys_dist <- ggplot(county_avg, aes(x = physicians)) +
+  geom_density(fill = "steelblue", alpha = 0.7) +
+  labs(
+    x = "Physicians per 100,000 residents",
+    y = "Density"
+  ) +
+  theme(
+  plot.title = element_text(size = 8, face = "bold"),
+  axis.title = element_text(size = 9),
+  axis.text  = element_text(size = 8)
+) +
+  theme_minimal()
+
+```
+
+```{r physicians-plot, echo=FALSE, fig.cap="Average COVID-19 case rates vs physicians per 100k (log scale)"}
+p_physicians <- ggplot(county_avg, aes(physicians, mean_cases)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE) +
+  scale_y_log10() +
+  labs(
+    x = "Physicians per 100,000 residents",
+    y = "Avg cases per 100k (log scale)"
+  ) +
+  theme(
+  plot.title = element_text(size = 8, face = "bold"),
+  axis.title = element_text(size = 9),
+  axis.text  = element_text(size = 8)
+) +
+  theme_minimal()
+
+```
+
+```{r displaying physician plots, echo=FALSE, fig.cap="Figure 9 (Left): Distribution of physicians per 100k of population | Figure 10 (Right) : Relationship between physician capacity and new COVID-19 case rates"}
+
+p_physicians <- p_physicians +
+  theme(
+    plot.margin = margin(t = 10, r = 30, b = 10, l = 10)
+  )
+
+p_phys_dist <- p_phys_dist +
+  theme(
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 30)
+  )
+
+p_phys_dist | p_physicians
+
+
+
+```
+
+Figure 9 indicates that healthcare capacity is unevenly distributed. Some counties entered the pandemic with far greater medical resources, which may have impacted the proportion of new cases. Physician availability is a plausible factor shaping testing, treatment, and reporting of COVID-19 cases.
+
+The trend line in Figure 10 is nearly flat, indicating little systematic relationship between physician capacity and the number of new cases. While access to medical care is critical for treatment and outcomes, these results suggest that physician availability alone does not strongly influence how widely COVID-19 spread across communities.
+
+##### *Healthcare Resources: ICU Bed Capacity*
+
+ICU bed availability per capita captures a county’s critical care capacity. Like physician density, ICU capacity reflects a healthcare system’s ability to manage severe cases rather than prevent transmission [11] [14]. However, counties with greater healthcare resources may have different testing and reporting patterns, potentially influencing observed case counts [3] [11].
+
+ICU bed capacity is also indicative of broader health system preparedness and investment, which may correlate with early detection, hospital admission thresholds, and public health coordination [11]. Areas with limited ICU resources may face incentives to restrict testing or hospital admission, particularly during surges, leading to under-representation of cases in official data.
+
+```{r icu-beds-distribution, echo=FALSE}
+
+p_icu_dist <- ggplot(county_avg, aes(x = icu_beds)) +
+  geom_density(fill = "steelblue", alpha = 0.7) +
+  coord_cartesian(
+    xlim = c(0, quantile(county_avg$icu_beds, 0.99, na.rm = TRUE))
+  ) +
+  labs(
+    x = "ICU beds per county",
+    y = "Density"
+  ) +
+  theme_minimal()
+
+```
+
+```{r icu-beds-plot, echo=FALSE}
+
+p_icu_cases <- ggplot(county_avg, aes(x = icu_beds, y = mean_cases)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(se = FALSE) +
+  scale_y_log10() +
+  coord_cartesian(
+    xlim = c(0, quantile(county_avg$icu_beds, 0.99, na.rm = TRUE))
+  ) +
+  labs(
+    x = "ICU beds per county",
+    y = "Avg cases per 100k (log scale)"
+  ) +
+  theme_minimal()
+```
+
+```{r displaying icu plots, echo=FALSE, fig.cap="Figure 11 (Left): Distribution of ICU beds | Figure 12 (Right) : Relationship between ICU bed capacity and new COVID-19 case rates"}
+p_icu_dist | p_icu_cases
+```
+
+The sharp spike close to zero in Figure 11 indicates that most U.S. counties have very limited ICU capacity, while a small number of counties, likely large urban cities, accounting for a disproportionate share of ICU beds. This highlights substantial geographic inequality in access to critical care.
+
+The near-flat trend line in Figure 12 indicates little direct relationship between ICU capacity and the number of new cases. This suggests that ICU availability reflects a county’s ability to respond to severe illness rather than its likelihood of experiencing higher transmission.
+
+Together, these five factors capture key differences in exposure (grocery mobility), vulnerability (age structure), response capacity (education, physicians, ICU beds), and reporting capability across US counties. To assess their relative importance, we estimate a regression model that considers all factors simultaneously.
+
+### Which Factors Matter More?
+
+```{r regression-data-prep, echo=FALSE}
+# Prepare regression dataset (county-day level)
+
+reg_data <- covid %>%
+  arrange(county_state, date) %>%
+  group_by(county_state) %>%
+  ungroup() %>%
+  select(
+    cases_rate,
+    mobility.grocery,
+    age.65.plus,
+    pcnt.less.than.high.school,
+    active.patient.care.physicians,
+    icu.beds,
+    state,
+    date
+  ) %>%
+  na.omit()
+
+```
+
+```{r Regression Results, echo=FALSE}
+
+model_3 <- lm(
+  cases_rate ~ age.65.plus +
+    pcnt.less.than.high.school +
+    active.patient.care.physicians +
+    icu.beds+ mobility.grocery + factor(state),
+  data = reg_data
+)
+
+
+coef_table <- broom::tidy(model_3)
+r2 <- summary(model_3)$r.squared
+adj_r2 <- summary(model_3)$adj.r.squared
+
+if (!knitr::is_html_output() && !knitr::is_latex_output()) {
+  print(coef_table)
+  cat("R-squared:", r2, "\n")
+  cat("Adjusted R-squared:", adj_r2, "\n")
+}
+
+```
+
+```{r standardized-coefs, echo=FALSE, fig.cap="Figure 13: Standardised regression coefficients."}
+library(broom)
+library(dplyr)
+library(ggplot2)
+
+# standardise predictors + outcome
+reg_std <- reg_data %>%
+  mutate(across(
+    c(cases_rate,
+      age.65.plus,
+      pcnt.less.than.high.school,
+      active.patient.care.physicians,
+      icu.beds,
+      mobility.grocery),
+    scale
+  ))
+
+model_std <- lm(
+  cases_rate ~ age.65.plus +
+    pcnt.less.than.high.school +
+    active.patient.care.physicians +
+    icu.beds +
+    mobility.grocery,
+  data = reg_std
+)
+
+coef_std <- tidy(model_std) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(
+    pretty = recode(term,
+      "age.65.plus" = "Population aged 65+",
+      "pcnt.less.than.high.school" = "No high school diploma",
+      "active.patient.care.physicians" = "Physicians per 100k",
+      "icu.beds" = "ICU beds",
+      "mobility.grocery" = "Grocery mobility"
+    ),
+    abs_est = abs(estimate)
+  ) %>%
+  arrange(desc(abs_est)) %>%
+  mutate(pretty = factor(pretty, levels = pretty))
+
+
+ggplot(coef_std, aes(pretty, estimate)) +
+  geom_col(fill = "#d95f5f") +   # <- red tone
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "orange") +
+  coord_flip() +
+  labs(
+    x = NULL,
+    y = "Standardised coefficient"
+  ) +
+  theme_minimal()
+
+
+
+```
+
+
+All estimated coefficients are negative as shown in Figure 13. This indicates that counties with higher values of these characteristics tend to report fewer new COVID-19 cases per capita. 
+
+The strongest association is observed for education. Counties with a higher share of adults without a high school diploma tend to have lower reported COVID-19 case rates, even after controlling for other factors. The negative direction likely reflects under-testing, reporting gaps, or access barriers, not protection from COVID, as highlighted by [3].
+
+Texas provides a useful case study due to its large number of counties and wide variation in education levels, demographics, and COVID-19 outcomes. As the share of people without a high-school diploma increases (Figure 14 vs Figure 15), a higher proportion of counties appear in lighter colours, indicating lower COVID-19 case rates. This visual pattern is consistent with the negative relationship observed in the regression results.
+
+
+```{r fig-texas-low, echo=FALSE, out.width="50%", fig.cap="Figure 14: COVID-19 case rates in 2022 for Texas counties where relatively fewer people lack a high-school diploma"}
+knitr::include_graphics("Data/Images/Texas -low.png")
+```
+
+```{r fig-texas-high, echo=FALSE, out.width="50%", fig.cap="Figure 15: COVID-19 case rates in 2022 for Texas counties where relatively more people lack a high-school diploma"}
+knitr::include_graphics("Data/Images/Texas -high.png")
+```
+
+
+The second strongest relationship relates to population age structure. Counties with a larger elderly population tend to report fewer new COVID-19 cases per capita. This likely reflects behavioral caution, mobility reduction, or testing patterns, rather than a lower biological risk of infection as stipulated by the evidence in [6].
+
+ICU bed availability and physician supply show smaller but still statistically significant associations with case rates. These relationships may reflect differences in testing, diagnosis, and reporting capacity rather than direct effects on transmission.
+
+Grocery mobility shows the weakest association among the factors considered. While essential movement to grocery and pharmacy locations is related to COVID-19 case rates, its relative contribution is modest compared to demographic and healthcare factors.
+
+Even when considered together, these structural and behavioral factors account for only a very small share (less than 3%) of the differences in county-level COVID-19 case rates. This highlights that much of the pandemic’s spread was driven by factors not captured here, such as policy timing, variants, and individual behavior.
+
+
+:::: only-html
+::: {style="margin-top: 30px;"}
+:::
+::::
+
+::: only-latex
+\vspace{15mm}
+:::
+
+### State Variations across the U.S.
+
+```{r prepare-spatial-data, echo=FALSE}
+state_avg <- covid %>%
+  group_by(state) %>%
+  summarise(
+    mean_cases = mean(cases_rate, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(region = tolower(state)) %>%
+  filter(!is.na(region))
+```
+
+```{r spatial-variation, echo=FALSE, fig.pos="H", fig.cap="Figure 16: Average COVID-19 case rates across U.S. states"}
+
+us_states <- map_data("state")
+
+map_data_cases <- left_join(us_states, state_avg, by = "region")
+
+p_map <- ggplot(
+  map_data_cases,
+  aes(
+    x = long,
+    y = lat,
+    group = group,
+    fill = mean_cases,
+    text = paste0(
+      "State: ", tools::toTitleCase(region),
+      "<br>Avg cases per 100k: ", round(mean_cases, 1)
+    )
+  )
+) +
+  geom_polygon(color = "white", linewidth = 0.2) +
+  coord_fixed(1.3) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    na.value = "grey90",
+    name = "Cases per 100k"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+# Interactive in HTML, static in PDF
+if (knitr::is_html_output()) {
+  ggplotly(
+    p_map,
+    tooltip = "text"
+  )
+} else {
+  p_map
+}
+```
+
+Figure 16 shows average COVID-19 case rates across U.S. states. Substantial spatial variation is evident, indicating that geographic and regional factors play a role in shaping pandemic outcomes.)
+
+:::: only-html
+::: {style="margin-top: 20px;"}
+:::
+::::
+
+::: only-latex
+\vspace{15mm}
+:::
+
+### Interactive Spatial Exploration of COVID-19 Risk
+
+Use the interactive map below to explore how COVID-19 case rates differed across U.S. counties. Select a state, year, or demographic percentile to see how patterns shift across regions. This allows you to compare counties with similar characteristics and observe how unevenly COVID-19 affected communities across the country.
+
+```{r interactive map, echo=FALSE}
+
+library(leaflet)
+library(crosstalk)
+library(htmltools)
+library(maps)
+library(dplyr)
+library(lubridate)
+
+# -------------------------------
+# County centroids
+# -------------------------------
+county_shapes <- map_data("county")
+
+county_centroids <- county_shapes %>%
+  group_by(region, subregion) %>%
+  summarise(
+    lon = mean(long),
+    lat = mean(lat),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    county = tools::toTitleCase(subregion),
+    state  = tools::toTitleCase(region),
+    county_state = paste(county, state, sep = ", ")
+  ) %>%
+  select(county_state, lon, lat)
+
+# -------------------------------
+# County-level dataset with year
+# -------------------------------
+county_map_data <- covid %>%
+  mutate(year = year(date)) %>%
+  group_by(county_state, state, year) %>%
+  summarise(
+    mean_cases = mean(cases_rate, na.rm = TRUE),
+
+    # percentages
+    age_65_pct = mean(age.65.plus, na.rm = TRUE),
+    low_edu_pct = first(pcnt.less.than.high.school),
+
+    # count
+    icu_beds = first(icu.beds),
+
+    .groups = "drop"
+  ) %>%
+  left_join(county_centroids, by = "county_state") %>%
+  filter(!is.na(lon), !is.na(lat)) %>%
+  mutate(
+    mean_cases   = pmax(mean_cases, 0),
+    age_65_pct   = pmax(age_65_pct, 0),
+    low_edu_pct  = pmax(low_edu_pct, 0),
+    icu_beds     = pmax(icu_beds, 0),
+    county_year_id = paste0(county_state, "_", year)
+  )
+
+# -------------------------------
+# Percentile categories 
+# -------------------------------
+county_map_data <- county_map_data %>%
+  mutate(
+    age65_band = factor(
+      ntile(age_65_pct, 5),
+      levels = 1:5,
+      labels = c("25th", "50th", "75th", "90th", "100th")
+    ),
+    lowedu_band = factor(
+      ntile(low_edu_pct, 5),
+      levels = 1:5,
+      labels = c("25th", "50th", "75th", "90th", "100th")
+    ),
+    icu_band = factor(
+      ntile(icu_beds, 5),
+      levels = 1:5,
+      labels = c("25th", "50th", "75th", "90th", "100th")
+    )
+  )
+
+# -------------------------------
+# Colour bins for cases 
+# -------------------------------
+q <- quantile(county_map_data$mean_cases,
+              probs = c(0, 0.25, 0.5, 0.75, 1),
+              na.rm = TRUE)
+
+q_int <- as.integer(round(q))
+q_int[1] <- 0
+mx <- ceiling(max(county_map_data$mean_cases, na.rm = TRUE))
+
+case_bins <- sort(unique(c(0, q_int[2:4], 40, mx)))
+
+case_pal <- colorBin(
+  palette = c("#edf8fb", "#b2e2e2", "#66c2a4", "#fc8d62", "#e34a33"),
+  bins = case_bins,
+  domain = county_map_data$mean_cases,
+  na.color = "grey80"
+)
+
+case_labels <- c(
+  paste0(case_bins[1], " – ", case_bins[2]),
+  paste0(case_bins[2], " – ", case_bins[3]),
+  paste0(case_bins[3], " – ", case_bins[4]),
+  paste0(case_bins[4], " – 40"),
+  "40+"
+)
+
+# -------------------------------
+# SharedData
+# -------------------------------
+shared_map_data <- SharedData$new(
+  county_map_data,
+  key = ~county_year_id,
+  group = "covid_map_group"
+)
+
+# -------------------------------
+# Styling
+# -------------------------------
+tags$style(HTML("
+  .filter-panel {
+    background:#2d2d2d;
+    padding:20px;
+    border-radius:10px;
+    margin-bottom:25px;
+    color:white;
+  }
+  .filter-panel h4 {
+    text-align:center;
+    font-weight:bold;
+    margin-bottom:20px;
+  }
+"))
+
+# -------------------------------
+# Filters 
+# -------------------------------
+bscols(
+  widths = 12,
+  div(
+    class = "filter-panel",
+    tags$h4("FILTERS"),
+
+    filter_select(
+      "state_filter",
+      "State",
+      shared_map_data,
+      ~state,
+      multiple = TRUE
+    ),
+
+    # Year 
+    filter_checkbox(
+      "year_filter",
+      "Year",
+      shared_map_data,
+      ~year,
+      inline = TRUE
+    ),
+
+    filter_checkbox(
+      "age65_pct_filter",
+      "Age 65+ (%) percentiles",
+      shared_map_data,
+      ~age65_band,
+      inline = TRUE
+    ),
+
+    filter_checkbox(
+      "lowedu_pct_filter",
+      "Less than high school (%) percentiles",
+      shared_map_data,
+      ~lowedu_band,
+      inline = TRUE
+    ),
+
+    filter_checkbox(
+      "icu_pct_filter",
+      "ICU beds (count) percentiles",
+      shared_map_data,
+      ~icu_band,
+      inline = TRUE
+    )
+  )
+)
+
+# -------------------------------
+# Leaflet map
+# -------------------------------
+leaflet(shared_map_data, width = "100%", height = 800) %>%
+  addProviderTiles("CartoDB.DarkMatter") %>%
+  addCircleMarkers(
+    lng = ~lon,
+    lat = ~lat,
+    radius = 4,
+    fillColor = ~case_pal(mean_cases),
+    fillOpacity = 0.9,
+    stroke = FALSE,
+    popup = ~paste0(
+      "<strong>", county_state, "</strong><br>",
+      "Year: ", year, "<br>",
+      "Avg cases per 100k: ", round(mean_cases, 1), "<br>",
+      "Age 65+: ", round(age_65_pct, 1), "%<br>",
+      "Less than high school: ", round(low_edu_pct, 1), "%<br>",
+      "ICU beds: ", icu_beds
+    )
+  ) %>%
+  addLegend(
+    position = "bottomright",
+    colors = c("#edf8fb", "#b2e2e2", "#66c2a4", "#fc8d62", "#e34a33"),
+    labels = case_labels,
+    title = "Avg COVID cases<br>per 100k",
+    opacity = 0.9
+  )
+
+```
+
+
+Overall, this analysis finds that population age structure, educational attainment, mobility patterns, and healthcare capacity are associated with COVID-19 case rates, but these relationships are generally modest and explain only a small share of the observed variation. This limited explanatory power reflects important data constraints, including biases in smartphone-based mobility measures and the inability to account for epidemiological time lags. It also highlights the inherently complex and multifactorial nature of disease transmission. While structural and socioeconomic factors shape community-level vulnerability, they do not fully capture the dynamics driving outbreaks, particularly in the absence of more granular demographic, behavioral, and temporal information. Future research would benefit from longitudinal approaches, richer measures of social and occupational exposure, and alternative mobility data sources to better understand how policy responses, compliance, and underlying inequalities interact to influence pandemic outcomes and to inform more targeted public health interventions in future crises.
+
+
+\newpage 
+
+::: {.pagebreak}
+:::
+
+
+:::: only-html
+::: {style="margin-top: 60px;"}
+:::
+::::
+
+
+
+#### References 
+
+[1] Alam, M. Z., Islam, M. S., & Kabir, E. (2021). Is population density a risk factor for communicable diseases like COVID-19? A case of Bangladesh. Asia Pacific Journal of Public Health, 33(8), 949–950. <https://doi.org/10.1177/1010539521998858>
+
+[2] Bhadra, A., Mukherjee, A., & Sarkar, K. (2021). Impact of population density on Covid-19 infected and mortality rate in India. Modeling Earth Systems and Environment, 7, 623–629. <https://doi.org/10.1007/s40808-020-00984-7>
+
+[3] Centers for Disease Control and Prevention. (n.d.). COVID-19 health disparities. U.S. Department of Health and Human Services. <https://www.cdc.gov/nchs/nvss/vsrr/covid19/health_disparities.htm>
+
+[4] Centers for Disease Control and Prevention. (n.d.). United States COVID-19 county level of community transmission. U.S. Department of Health and Human Services. <https://data.cdc.gov/Public-Health-Surveillance/United-States-COVID-19-County-Level-of-Community-T/nra9-vzzn>
+
+[5] Dong, E., Du, H., & Gardner, L. (2020). An interactive web-based dashboard to track COVID-19 in real time. The Lancet Infectious Diseases, 20(5), 533–534. [https://doi.org/10.1016/S1473-3099(20)30120-1](https://doi.org/10.1016/S1473-3099(20)30120-1){.uri}
+
+[6] DuPre, N. C., Karimi, S., Zhang, C. H., Blair, L., Gupta, A., Alharbi, L. M. A., Alluhibi, M., Mitra, R., McKinney, W. P., & Little, B. (2021). County-level demographic, social, economic, and lifestyle correlates of COVID-19 infection and death trajectories during the first wave of the pandemic in the United States. Science of The Total Environment, 786, Article 147495. <https://doi.org/10.1016/j.scitotenv.2021.147495>
+
+[7] Google. (2020). COVID-19 community mobility reports. <https://www.google.com/covid19/mobility/>
+
+[8] Google. (2020). COVID-19 community mobility reports: Data documentation. <https://www.google.com/covid19/mobility/data_documentation.html>
+
+[9] Ives, A. R., & Bozzuto, C. (2021). Estimating and explaining the spread of COVID-19 at the county level in the USA. Communications Biology, 4, Article 60. <https://doi.org/10.1038/s42003-020-01609-6>
+
+[10] Johns Hopkins University. (n.d.). COVID-19 united states cases by county. Coronavirus Resource Center. <https://coronavirus.jhu.edu/us-map>
+
+[11] Khan, D., Park, M., Burkholder, J., Dumbuya, S., Ritchey, M. D., Yoon, P., Galante, A., Duva, J. L., Freeman, J., Duck, W., Soroka, S., Bottichio, L., Wellman, M., Lerma, S., Lyons, B. C., Dee, D., Haile, S., Gaughan, D. M., Langer, A., … Suthar, A. B. (2023). Tracking COVID-19 in the United States with surveillance of aggregate cases and deaths. Public Health Reports, 138(3), 428–437. <https://doi.org/10.1177/00333549231163531>
+
+[12] Koo, J. R., Cook, A. R., Park, M., Sun, Y., Sun, H., Lim, J. T., Tam, C., & Dickens, B. L. (2020). Interventions to mitigate early spread of SARS-CoV-2 in Singapore: A modelling study. The Lancet Infectious Diseases, 20(6), 678–688. [https://doi.org/10.1016/S1473-3099(20)30553-3](https://doi.org/10.1016/S1473-3099(20)30553-3){.uri}
+
+[13] Kranjac, A. W., & Kranjac, D. (2021). County-level factors that influenced the trajectory of COVID-19 incidence in the New York City area. Health Security, 19(S1), S-27–S-33. <https://doi.org/10.1089/hs.2020.0236>
+
+[14] Le, D., & Hawkins, D. (2021). Variation in employment in healthcare occupations and county-level differences in COVID-19 cases in the United States of America. Journal of Occupational and Environmental Medicine, 63(8), 629–631. <https://doi.org/10.1097/JOM.0000000000002230>
+
+[15] Sulyok, M., & Walker, M. (2020). Community movement and COVID-19: A global study using Google's Community Mobility Reports. Epidemiology and Infection, 148, Article e284. <https://doi.org/10.1017/s0950268820002757>
+
+[16] Sy, K. T. L., White, L. F., & Nichols, B. E. (2021). Population density and basic reproductive number of COVID-19 across United States counties. PLoS ONE, 16(4), Article e0249271. <https://doi.org/10.1371/journal.pone.0249271>
+
+[17] Wu, J. (2020). COVID-19 US county-level summaries [Data set]. GitHub. <https://github.com/JieYingWu/COVID-19_US_County-level_Summaries>
+
+[18] Zachreson, C., Mitchell, L., Lydeamore, M. J., Rebuli, N., Tomko, M., & Geard, N. (2021). Risk mapping for COVID-19 outbreaks using mobility data. Journal of The Royal Society Interface, 18(174), Article 20200657. <https://doi.org/10.1098/rsif.2020.0657>
+
+
+
+
+#### AI Declaration
+
+We would like to acknowledge that our group used ChatGPT to help with the research process, including gathering ideas and clarifying concepts. We also used Grammarly to check and improve our grammar, spelling, and wording. These tools supported us in creating clear and accurate content, but all final decisions and interpretations are our own.
+
